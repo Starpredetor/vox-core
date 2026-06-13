@@ -10,6 +10,13 @@ pub struct Resampler {
     phase: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum AudioSource {
+    Microphone,
+    SystemAudio,
+}
+
+
 impl Resampler {
     pub fn new(input_rate: u32, ) -> Self {
         Self { 
@@ -91,16 +98,26 @@ impl NoiseGate {
         }
     }
 }
+
+
 pub struct AudioInput {
     _stream: cpal::Stream,
 }
 impl AudioInput {
-    pub fn new(mut producer: ringbuf::CachingProd<Arc<HeapRb<f32>>>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(source: AudioSource, mut producer: ringbuf::CachingProd<Arc<HeapRb<f32>>>) -> Result<Self, Box<dyn std::error::Error>> {
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or("No input audio device found")?;
-        let config = device.default_input_config()?;
+        let device = match source {
+            AudioSource::Microphone => host
+                .default_input_device()
+                .ok_or("No input audio device found.")?,
+            AudioSource::SystemAudio => host
+                .default_output_device()
+                .ok_or("No Output audio device found.")?,
+        };
+        let config = match source {
+            AudioSource::Microphone => device.default_input_config()?,
+            AudioSource::SystemAudio => device.default_output_config()?,
+        };
         let sample_rate = config.sample_rate();
         let channels = config.channels();
         println!(
