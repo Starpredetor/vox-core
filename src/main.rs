@@ -7,6 +7,42 @@ use std::io::{self, Write};
 use audio::{AudioInput, AudioSource};
 use stt::SttEngine;
 
+const MAX_LINE_CHARS: usize = 50;
+const MAX_LINES: usize = 5;
+
+fn clean_transcription(text: &str) -> String {
+    text.replace("[BLANK_AUDIO]", "")
+        .replace("[blank_audio]", "")
+        .replace("(laughter)", "")
+        .replace("(sighs)", "")
+        .replace("(music)", "")
+        .replace("Thank you.", "")
+        .replace("Thank you for watching.", "")
+        .trim()
+        .to_string()
+}
+
+fn format_into_lines(text: &str, max_chars: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+
+    for word in text.split_whitespace() {
+        if current_line.is_empty() {
+            current_line.push_str(word);
+        } else if current_line.len() + 1 + word.len() <= max_chars {
+            current_line.push(' ');
+            current_line.push_str(word);
+        } else {
+            lines.push(current_line);
+            current_line = word.to_string();
+        }
+    }
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+    lines
+}
+
 fn select_audio_source() -> AudioSource {
     println!("=== VOX-CORE AUDIO CAPTURE TEST ===");
     println!("1. Microphone (Input Device)");
@@ -52,14 +88,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let silence_threshold = 0.008; 
     let silence_timeout_blocks = 12;
+
     loop {
         let read_count = cons.pop_slice(&mut temp_buffer);
         if read_count > 0 {
             let chunk = &temp_buffer[..read_count];
-            
-            
             let peak = chunk.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-            
             
             audio_accumulator.extend_from_slice(chunk);
             if peak < silence_threshold {
@@ -68,31 +102,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 silent_blocks_count = 0; 
             }
             
-            if silent_blocks_count >= silence_timeout_blocks {
-                if !audio_accumulator.is_empty() {
-                    
-                    if let Ok(text) = stt_engine.transcribe(&audio_accumulator) {
-                        if !text.is_empty() {
-                            print!("\r[Final] {}\n", text);
-                            io::stdout().flush().unwrap();
+            let is_silence_timeout = silent_blocks_count >= silence_timeout_blocks;
+            let is_time_to_transcribe = audio_accumulator.len() - last_transcribe_len >= 12800;
+            
+            if is_silence_timeout || is_time_to_transcribe {
+                if let Ok(raw_text) = stt_engine.transcribe(&audio_accumulator) {
+                    let cleaned = clean_transcription(&raw_text);
+                    let lines = format_into_lines(&cleaned, MAX_LINE_CHARS);
+                    let should_commit = (is_silence_timeout && !cleaned.is_empty()) || (lines.len() >= MAX_LINES);
+
+                    if should_commit {
+                        print!("\r\x1b[K");
+                        for line in &lines {
+                            println!("[Final] {}", line);
                         }
-                    }
-                    audio_accumulator.clear();
-                    last_transcribe_len = 0;
-                }
-                silent_blocks_count = 0;
-            } 
-            else if audio_accumulator.len() - last_transcribe_len >= 12800 { 
-                if let Ok(text) = stt_engine.transcribe(&audio_accumulator) {
-                    if !text.is_empty() {
-                        print!("\r[Transcribing...] {}\x1b[K", text);
                         io::stdout().flush().unwrap();
+
+                        let overlap_samples = 24000;
+                        if audio_accumulator.len() > overlap_samples {
+                            audio_accumulator = audio_accumulator[audio_accumulator.len() - overlap_samples..].to_vec();
+                        } else {
+                            audio_accumulator.clear();
+                        }
+                        
+                        last_transcribe_len = audio_accumulator.len();
+                        silent_blocks_count = 0;
+                    } else if is_time_to_transcribe {
+                        if !cleaned.is_empty() {
+                            let max_display_len = 60;
+                            let display_text = if cleaned.len() > max_display_len {
+                                format!("...{}", &cleaned[cleaned.len() - max_display_len..])
+                            } else {
+                                cleaned.clone()
+                            };
+                            print!("\r[Transcribing...] {}\x1b[K", display_text);
+                        } else {
+                            print!("\r\x1b[K");
+                        }
+                        io::stdout().flush().unwrap();
+                        last_transcribe_len = audio_accumulator.len();
                     }
                 }
-                last_transcribe_len = audio_accumulator.len();
             }
         }
-        
         std::thread::sleep(Duration::from_millis(100));
     }
 }
