@@ -2,6 +2,13 @@
 
 vox-core is a lightweight, high-performance offline speech-to-text pipeline written in Rust. It captures audio from either a microphone or the system loopback, runs real-time digital signal processing (DSP) filters, and transcribes the audio stream locally using Whisper.
 
+
+## Demo
+
+<p align="center">
+  <img src="assets/demo.gif" width="800">
+</p>
+
 ## Technical Specifications
 
 - Language: Rust (Edition 2024)
