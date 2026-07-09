@@ -25,12 +25,37 @@ All raw audio samples undergo a three-stage real-time DSP pipeline:
 - Default path: `models/ggml-tiny.en.bin`
 - Source: [ggerganov/whisper.cpp (HuggingFace)](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin)
 
-## CLI Interface
+## CLI Interface & Processing Loop
 
 At startup, the CLI provides an interactive audio source selection menu:
 1. **Microphone**: Captures the default input recording endpoint.
 2. **System Audio**: Captures the default output device playback stream (via WASAPI loopback).
 
-### Processing Loop
-- **Real-Time Update**: The active audio segment is transcribed and updated inline (overwriting the current terminal line) every 800ms.
-- **Voice Activity Detection / Segment Split**: If continuous silence is detected for more than 1.2 seconds, the current text segment is finalized, printed as a new line, and the sliding window accumulator is cleared.
+### Processing Logic
+- **Hallucination Cleaning**: Commonly generated silence hallucinations (e.g. `[BLANK_AUDIO]`, `(music)`, `Thank you.`) are stripped out.
+- **Live Display**: The active, uncommitted audio segment is transcribed and updated inline. The terminal output is truncated to the last 60 characters to prevent line wrapping and screen duplication.
+- **Length-Based Committing**: Text is formatted into lines of 50 characters. Once the text reaches 5 lines (250 characters) OR a 1.2-second pause is detected:
+  - The block is printed as `[Final]`.
+  - The accumulator is cleared, retaining a 1.5-second audio overlap window to preserve transcription context for the next block.
+
+## Running Instructions
+
+### Setup Model
+Download the GGML model in the `models/` directory :
+```bash
+mkdir models
+# Download the model and place it as `models/ggml-tiny.en.bin`
+```
+
+### Windows (PowerShell)
+To bypass LLVM/Clang requirements during building, set the `WHISPER_DONT_GENERATE_BINDINGS` environment variable before running:
+```powershell
+$env:WHISPER_DONT_GENERATE_BINDINGS="1"
+cargo run
+```
+
+### macOS & Linux
+```bash
+export WHISPER_DONT_GENERATE_BINDINGS=1
+cargo run
+```
